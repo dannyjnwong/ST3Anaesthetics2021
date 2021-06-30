@@ -16,7 +16,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 # Load libraries
 library(tidyverse)
-library(googlesheets4)
+#library(googlesheets4)
 library(janitor)
 library(DiagrammeR) #Needs ver. 0.9.2 to work
 library(tableone)
@@ -25,7 +25,7 @@ library(pander)
 panderOptions('table.split.table', Inf)
 
 # Load survey data via Google Sheets
-survey <- read_sheet("https://docs.google.com/spreadsheets/d/14LmXkStaruBSxjz9IrTAh3T-rPczayQDy-J5Jdnb8X0/edit?usp=sharing")
+survey <- read_csv("../data/survey_data_raw.csv")
 
 # Minor cleanup 
 names(survey) <- make_clean_names(names(survey), case = "big_camel")
@@ -72,13 +72,9 @@ survey_clean <- survey %>%
 strobe_table <- rbind(strobe_table, data.frame(Description = "Excluded: not eligible to apply for ST3",
                                                N = nrow(survey_clean)))
 
-# Remove email identifier and save raw data
-survey_export <- survey %>% select(-DoYouConsentToBeContactedInTheFutureViaEmailIfSoPleaseProvideYourEmailAddress)
-write_csv(survey_export, "../data/survey_data_raw.csv")
-
 # Export data for the purpose of the Shiny App
 shiny_survey_data <- survey_clean %>% select(WhatIsYourAge, WhatIsYourSex, WhatIsYourCurrentRole, WhichRegionAreYouCurrentlyWorkingIn, WhatGeneralConcernsWouldYouLikeToShareWithUsRegardingThisYearsSt3ApplicationsIfThereAreSpecificPersonalCircumstancesYouAreHappyToShareWithTheRelevantStakeholdersPleaseFeelFreeToContributeThemHereWeMayPublishSomeOfTheseAsAnonymisedQuotesToConveyTheDepthOfFeelingAroundThisIssue)
-saveRDS(shiny_survey_data, "../ST3RecruitmentSurvey/data/shiny_survey_data.rds")
+#saveRDS(shiny_survey_data, "../ST3RecruitmentSurvey/data/shiny_survey_data.rds")
 ```
 
 # Title: Anaesthetic Higher Specialty Training Recruitment in the United Kingdom During The COVID-19 Pandemic: A National Survey
