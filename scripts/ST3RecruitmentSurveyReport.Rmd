@@ -1,0 +1,471 @@
+---
+title: "2021 ST3 Recruitment Survey Report (ver 1.6)"
+author: "Fionnuala Durrant, Stuart Edwardson, Sally El-Ghazali, Christopher Holt, Roo McCrossan, Ileena Pramanik, Jeevakan Subramaniam, Danny J. N. Wong"
+date: "07/06/2021"
+bibliography: ../references/CovidWorkforce.bib
+csl: ../references/anaesthesia.csl
+link-citations: yes
+output:
+  word_document:
+    toc: yes
+    reference_docx: styles_phd.docx
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Load libraries
+library(tidyverse)
+library(googlesheets4)
+library(janitor)
+library(DiagrammeR) #Needs ver. 0.9.2 to work
+library(tableone)
+library(stringr)
+library(pander)
+panderOptions('table.split.table', Inf)
+
+# Load survey data via Google Sheets
+survey <- read_sheet("https://docs.google.com/spreadsheets/d/14LmXkStaruBSxjz9IrTAh3T-rPczayQDy-J5Jdnb8X0/edit?usp=sharing")
+
+# Minor cleanup 
+names(survey) <- make_clean_names(names(survey), case = "big_camel")
+survey <- survey %>%
+  mutate(WhatIsYourCurrentRole = recode(WhatIsYourCurrentRole,
+                                        `LAT ST3 Anaesthetics` = "LAT ST3",
+                                        `Locum Appointment to Training (ST3 level)` = "LAT ST3",
+                                        `Medical Training Initiative (MTI) fellow` = "MTI Fellow",
+                                        `Mti` = "MTI Fellow",
+                                        `MTI trainee` = "MTI Fellow",
+                                        `Speciality doctor` = "Non-training Fellow, SAS or other Trust-Grade post",
+                                        `Specialty Doctor` = "Non-training Fellow, SAS or other Trust-Grade post",
+                                        `ST3 LAT` = "LAT ST3",
+                                        `St3` = "LAT ST3",
+                                        `LAT` = "LAT ST3",
+                                        `LAT3` = "LAT ST3",
+                                        `Non-training Fellow or other Trust-Grade post` = "Non-training Fellow, SAS or other Trust-Grade post",
+                                        `Retrival medicine` = "Non-training Fellow, SAS or other Trust-Grade post",
+                                        `Working in medical education at university, occasional locum` = "Non-training Fellow, SAS or other Trust-Grade post"))
+
+survey$WhatGeneralConcernsWouldYouLikeToShareWithUsRegardingThisYearsSt3ApplicationsIfThereAreSpecificPersonalCircumstancesYouAreHappyToShareWithTheRelevantStakeholdersPleaseFeelFreeToContributeThemHereWeMayPublishSomeOfTheseAsAnonymisedQuotesToConveyTheDepthOfFeelingAroundThisIssue <- gsub("‘|’", "'", survey$WhatGeneralConcernsWouldYouLikeToShareWithUsRegardingThisYearsSt3ApplicationsIfThereAreSpecificPersonalCircumstancesYouAreHappyToShareWithTheRelevantStakeholdersPleaseFeelFreeToContributeThemHereWeMayPublishSomeOfTheseAsAnonymisedQuotesToConveyTheDepthOfFeelingAroundThisIssue)
+
+# Remove some duplicated (identified via duplicated free-text statements and email addresses)
+## Assign a ID
+survey$ID <- 1:nrow(survey)
+
+## Give an index of the ones to remove
+to_remove <- survey[(duplicated(survey$WhatGeneralConcernsWouldYouLikeToShareWithUsRegardingThisYearsSt3ApplicationsIfThereAreSpecificPersonalCircumstancesYouAreHappyToShareWithTheRelevantStakeholdersPleaseFeelFreeToContributeThemHereWeMayPublishSomeOfTheseAsAnonymisedQuotesToConveyTheDepthOfFeelingAroundThisIssue) | is.na(survey$WhatGeneralConcernsWouldYouLikeToShareWithUsRegardingThisYearsSt3ApplicationsIfThereAreSpecificPersonalCircumstancesYouAreHappyToShareWithTheRelevantStakeholdersPleaseFeelFreeToContributeThemHereWeMayPublishSomeOfTheseAsAnonymisedQuotesToConveyTheDepthOfFeelingAroundThisIssue)),] %>% filter(!is.na(WhatGeneralConcernsWouldYouLikeToShareWithUsRegardingThisYearsSt3ApplicationsIfThereAreSpecificPersonalCircumstancesYouAreHappyToShareWithTheRelevantStakeholdersPleaseFeelFreeToContributeThemHereWeMayPublishSomeOfTheseAsAnonymisedQuotesToConveyTheDepthOfFeelingAroundThisIssue)) %>% pull(ID)
+
+## Remove
+survey <- survey %>% filter(!ID %in% to_remove)
+
+## Recode the number of years of clinical anaesthetic experience for the one respondent who was ACCS and said only had 1 year of anaesthetics
+survey <- survey %>% mutate(HowManyYearsOfClinicalExperienceInAnaesthesiaWouldYouHaveCompletedByAugust2021 = ifelse(HowManyYearsOfClinicalExperienceInAnaesthesiaWouldYouHaveCompletedByAugust2021 == 1, 2, HowManyYearsOfClinicalExperienceInAnaesthesiaWouldYouHaveCompletedByAugust2021))
+
+# STROBE table and exclusions
+strobe_table <- data.frame(Description = "Total survey responses available", 
+                           N = nrow(survey))
+
+# Remove responses from those not eligible to apply for ST3
+survey_clean <- survey %>%
+  filter(WereYouEligibleToApplyForAnAugust2021St3Post == "Yes")
+
+strobe_table <- rbind(strobe_table, data.frame(Description = "Excluded: not eligible to apply for ST3",
+                                               N = nrow(survey_clean)))
+
+# Remove email identifier and save raw data
+survey_export <- survey %>% select(-DoYouConsentToBeContactedInTheFutureViaEmailIfSoPleaseProvideYourEmailAddress)
+write_csv(survey_export, "../data/survey_data_raw.csv")
+
+# Export data for the purpose of the Shiny App
+shiny_survey_data <- survey_clean %>% select(WhatIsYourAge, WhatIsYourSex, WhatIsYourCurrentRole, WhichRegionAreYouCurrentlyWorkingIn, WhatGeneralConcernsWouldYouLikeToShareWithUsRegardingThisYearsSt3ApplicationsIfThereAreSpecificPersonalCircumstancesYouAreHappyToShareWithTheRelevantStakeholdersPleaseFeelFreeToContributeThemHereWeMayPublishSomeOfTheseAsAnonymisedQuotesToConveyTheDepthOfFeelingAroundThisIssue)
+saveRDS(shiny_survey_data, "../ST3RecruitmentSurvey/data/shiny_survey_data.rds")
+```
+
+# Title: Anaesthetic Higher Specialty Training Recruitment in the United Kingdom During The COVID-19 Pandemic: A National Survey
+
+## Authors
+
+Fionnuala Durrant [^GSTT_fellow], Stuart Edwardson [^Scotland], Sally El-Ghazali [^GSTT_postCCT], Christopher Holt [^GSTT_fellow], Roopa McCrossan [^Freeman], Ileena Pramanik [^GSTT_trainee], Jeevakan Subramaniam [^GSTT_trainee], Danny J. N. Wong [^GSTT_trainee]
+
+[^GSTT_fellow]: Clinical Fellow in Anaesthesia, Department of Anaesthesia, Guy's and St Thomas' NHS Foundation Trust, London, UK.
+[^Scotland]: Specialty Trainee in Anaesthesia and Intensive Care Medicine, South East Scotland School of Anaesthesia.
+[^GSTT_postCCT]: Post-CCT Fellow in Anaesthesia, Department of Anaesthesia, Guy's and St Thomas' NHS Foundation Trust, London, UK.
+[^Freeman]: Locum Consultant Anaesthetist, Freeman Hospital, Newcastle Hospitals NHS Foundation Trust, Newcastle-upon-Tyne, UK.
+[^GSTT_trainee]: Specialty Trainee in Anaesthesia, Department of Anaesthesia, Guy's and St Thomas' NHS Foundation Trust, London, UK.
+
+Correspondence to: Dr Danny J. N. Wong (Department of Anaesthesia, Guy's and St Thomas' NHS Foundation Trust, London, UK; dannywong@doctors.net.uk; @dannyjnwong)
+
+## Short title
+
+ST3 Recruitment During the COVID-19 Pandemic
+
+## Keywords
+- Medical Education
+- Professional Burnout
+- Anaesthesia
+- Curriculum
+- Surveys and Questionnaires
+
+# Summary
+
+The most recent ST3 Anaesthetic recruitment for posts commencing in August 2021 saw larger numbers of applicants (n = 1,056) compared to previous years, with approximately 700 applicants failing to secure an ST3 post. We surveyed `r sum(survey$DidYouApplyForAnSt3AnaestheticsPostToCommenceInAugust2021 == "Yes", na.rm = TRUE)` anaesthetic junior doctors who applied for ST3 posts during this application round with the aim of investigating their experience of the recruitment process this year (response rate `r sum(survey$DidYouApplyForAnSt3AnaestheticsPostToCommenceInAugust2021 == "Yes", na.rm = TRUE)`/1,056 = `r sum(survey$DidYouApplyForAnSt3AnaestheticsPostToCommenceInAugust2021 == "Yes", na.rm = TRUE)/1056 * 100`%). Approximately `r sum(survey_clean$WereYouSuccessfulWithYourSt3ApplicationInThisApplicationRound == "No", na.rm = TRUE)/sum(survey_clean$DidYouApplyForAnSt3AnaestheticsPostToCommenceInAugust2021 == "Yes") * 100 %>% round(digits = 1)`% were not offered ST3 posts (n = `r sum(survey_clean$WereYouSuccessfulWithYourSt3ApplicationInThisApplicationRound == "No", na.rm = TRUE)`), a similar proportion to that previously reported. We asked all respondents what their potential career plans were for the next 12 to 24 months. The majority expressed intentions to take up either CT3 top-up posts or Non-training fellow posts from August 2021 (`r str_detect(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply, "CT3 top-up post|Non-training fellow post") %>% sum(na.rm = TRUE)/sum(!is.na(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply)) * 100`%). Other options which were considered by respondents included: pursuing work abroad (`r str_detect(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply, "Work abroad") %>% sum(na.rm = TRUE)/sum(!is.na(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply)) * 100`%), embarking on a career break (`r str_detect(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply, "Career break") %>% sum(na.rm = TRUE)/sum(!is.na(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply)) * 100`%), taking up an ST3 post in intensive care medicine instead of anaesthetics (`r str_detect(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply, "ICM ST3 post") %>% sum(na.rm = TRUE)/sum(!is.na(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply)) * 100`%) and permanently leaving the medical profession (`r str_detect(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply, "Permanently leaving the medical profession") %>% sum(na.rm = TRUE)/sum(!is.na(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply)) * 100`%). A number of respondents further expressed a desire to pursue training in a different medical specialty (`r str_detect(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply, "Pursue training in a different specialty - specify below") %>% sum(na.rm = TRUE)/sum(!is.na(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply)) * 100`%). Some respondents expressed an intention to pursue a further education or research (`r str_detect(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply, "Further education|research") %>% sum(na.rm = TRUE)/sum(!is.na(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply)) * 100`%). A large proportion of respondents (`r (survey_clean %>% select(DoYouFeelConfidentOrAssuredThatYouWillBeAbleToAchieveTheNecessaryCompetenciesToApplyForSt4InAugust2023) %>% drop_na() %>% table() %>% prop.table() %>% .["No"]) * 100`%) expressed a lack of confidence in being able to achieve the necessary training requirements to later apply for ST4 in August 2023. The majority of respondents reported not feeling confident in achieving GMC Specialty Registration in Anaesthesia in the future without an ST3 training number (`r (survey_clean %>% select(HowConfidentAreYouThatYouWillBeAbleToAchieveGmcRegistrationOnTheSpecialtyRegisterInAnaesthesiaWithoutATrainingNumber) %>% drop_na() %>% table() %>% prop.table() %>% .["Not confident"]) * 100`%), and that their wider life plans have been disrupted due to the impending time out of training (`r sum(survey$HasTheTimeOutOfATrainingProgrammeAffectedAnyOfYourWiderLifePlansEGMovingLocationFamilyPlanningBuyingAHouse == "Yes", na.rm = TRUE)/sum(!is.na(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply)) * 100`%). We received a total of `r sum(!is.na(survey_clean$WhatGeneralConcernsWouldYouLikeToShareWithUsRegardingThisYearsSt3ApplicationsIfThereAreSpecificPersonalCircumstancesYouAreHappyToShareWithTheRelevantStakeholdersPleaseFeelFreeToContributeThemHereWeMayPublishSomeOfTheseAsAnonymisedQuotesToConveyTheDepthOfFeelingAroundThisIssue))` free-text responses to a question asking about general concerns regarding the ST3 applications process. Sentiment analysis of these free-text responses indicated that respondents felt generally negative towards the ST3 recruitment process. Some themes that were elicited from the responses included: respondents feeling the recruitment process lacked fairness, respondents suffering burnout and negative impacts on their wellbeing, difficulties in making plans for their personal lives, and feeling undervalued and abandoned despite having made personal sacrifices to support the health service during the COVID-19 pandemic. These results suggest that junior anaesthetic doctors in the UK currently have a negative perception towards postgraduate training structures, which has been exacerbated by the COVID-19 pandemic, changes to the postgraduate training curriculum and difficulties in securing higher training posts.
+
+# Introduction
+
+Prior to the COVID-19 pandemic, a major change was planned to the UK anaesthetics training curriculum. This was initially due to be enacted in 2020, but was deferred to 2021 due to disruptions to the health service brought about by the pandemic. Previously, after basic anaesthetic training, a trainee in the UK would be eligible to apply for intermediate and higher training posts at the ST3 (Specialty Training Year 3) level, through a competitive application process including interview. However, with the 2021 anaesthetics curriculum, the transition between basic and intermediate training has been replaced by new milestones, renamed as Level 1 and Level 2 training, respectively [@royal_college_of_anaesthetists_2021_2021]. 
+
+This change in curriculum means that entry into intermediate and higher training at ST3 level will eventually cease and will instead be replaced by entry into Level 2 training at ST4 level. Therefore, if a trainee is unsuccessful at ST3 in the final recruitment round, they will have to apply in 2023 for ST4 entry. If an individual wishes to continue with anaesthetic training, they will have to find an non-training post in which they can complete all required educational and professional development competencies to be eligible to apply for ST4 entry in accordance with the new curriculum. 
+
+The curriculum transition, together with a number of other factors, may have resulted in increased competition during the most recent recruitment round for ST3 posts commencing in August 2021, with a larger number of applicants applying this year. According to figures released by the Royal College of Anaesthetists, 1056 applicants competed for 359 posts at ST3 level this year, while 865 were granted an interview [@royal_college_of_anaesthetists_anaesthesia_2021].
+
+This is a difficult time for many trainees who have worked hard over the past 12 months of the pandemic supporting their colleagues in Intensive Care Units (ICUs) up and down the country. From the start of the pandemic, the UK required rapid expansion of ICU capacity and anaesthesia trainees were among the first cohort of trainees redeployed to care for the increased numbers of patients requiring mechanical ventilation. It is perhaps unsurprising that many who took part in the applications process have publicly expressed disappointment with this year's ST3 applications process [@shaun_lintern_slap_2021; @munro_nearly_2021]. 
+
+Many anaesthetic trainees unsuccessful with applications this year have expressed confusion as to how bridge the gap between the termination of their current training appointments and rejoining training under the new curriculum. Therefore, we sought to find out what their plans were for the next 12 to 24 months, with the intention of informing relevant stakeholders at the Royal College, Association of Anaesthetists and employing organisations, so that they may best support trainees with their training and welfare needs.
+
+# Methods
+
+We conducted a survey in collaboration with the Association of Anaesthetists, collecting data from 20 May 2021 to 30 June 2021 via a Google Forms (Mountain View, California, USA) survey tool. The survey was constructed using a modified Delphi method: questions were drafted using themes derived from the UK national F2 Career Destinations Reports [@uk_foundation_programme_uk_2021]. A pilot survey was conducted with a group of 8 trainees within the South London School of Anaesthesia (round 1). The feedback from this first pilot round was used to refine the survey questions which were then subject to internal peer-review at the Association of Anaesthetists Trainee Committee (round 2) before dissemination nationally.
+
+The final survey was approved by the Association of Anaesthetists internal governance applications process, and is available from: http://bit.ly/ST3Anaesthetics2021. Full survey questions are available as Supplementary Material.
+
+The survey was publicised via the Association of Anaesthetists email mailing list, and via the Association of Anaesthetists' and the authors' social media accounts on Twitter, WhatsApp and Facebook. To ensure as many trainees as possible were aware of the survey, the Heads of Schools of Anaesthesia for each UK postgraduate training region was contacted via email, and asked to distribute the survey within their regions. Periodic reminders were sent out at 1 month and 1 week prior to survey closure via the aforementioned email and social media routes.
+
+## Analysis
+
+We undertook an exploratory analysis of the response data. Possible duplicate submissions were identified and removed before analysis. Descriptive statistics of the response rate, respondent demographics, ST3 application outcomes and destinations, and answers to questions requiring Likert scale responses are reported. Means and standard deviations, or medians and interquartile ranges are reported for continuous variables, as appropriate to their distributions. Frequencies (numbers) and percentages are reported for categorical variables. Illustrative quotes are reported within the results text for the subset of questions requiring free-text responses. A sentiment analysis using a method described by Rinker [@rinker_sentimentr_2019] was performed to analyse responses to a free-text question asked at the end of the survey. Sentiment analysis is a computer natural language processing approach to investigating the attitudes and opinions expressed in texts: responses were algorithmically scored for text sentiment polarity (positive, negative, or neutral) at the sentence level against a dictionary of polarised words, with positive and negative words are scored with a +1 and -1, respectively. In this analysis, a score greater than zero indicated a positive sentiment, less than zero a negative sentiment, and zero a neutral sentiment, for the whole free-text response overall. This was conducted to rapidly screen the large number of free-text generated in the survey in lieu of a full qualitative thematic analysis. We then went through the free-text responses by hand to extract themes from the text. A free-text response software tool was constructed that facilitated the filtering of free-text responses by respondent characteristics, and which allowed the text to be read more easily by the authors via their web browsers (https://dannyjnwong.shinyapps.io/ST3RecruitmentSurvey/). Analysis was undertaken in `r R.version$version.string` (`r citation()$organization`, `r citation()$address`). Code for analysis will be available from https://github.com/dannyjnwong/ST3Anaesthetics2021.
+
+# Results
+
+## Response rate
+
+Of the total `r nrow(survey)` responses submitted, `r nrow(survey %>% filter(WereYouEligibleToApplyForAnAugust2021St3Post == "No"))` (`r nrow(survey %>% filter(WereYouEligibleToApplyForAnAugust2021St3Post == "No"))/nrow(survey) * 100`%) were not eligible to apply for an ST3 post due to commence in August 2021, and were excluded from analysis (Figure 1). The total number of responses included in analysis was therefore `r nrow(survey %>% filter(WereYouEligibleToApplyForAnAugust2021St3Post == "Yes"))`. The number of respondents who applied for an ST3 post was `r sum(survey$DidYouApplyForAnSt3AnaestheticsPostToCommenceInAugust2021 == "Yes", na.rm = TRUE)`. Of the respondents who applied for an ST3 post, `r table(survey$WereYouSuccessfulWithYourSt3ApplicationInThisApplicationRound)["Yes"]`/`r sum(survey$DidYouApplyForAnSt3AnaestheticsPostToCommenceInAugust2021 == "Yes", na.rm = TRUE)` (`r table(survey$WereYouSuccessfulWithYourSt3ApplicationInThisApplicationRound)["Yes"]/ sum(survey$DidYouApplyForAnSt3AnaestheticsPostToCommenceInAugust2021 == "Yes", na.rm = TRUE) * 100`%) were successfully appointed to an ST3 post, and `r table(survey$WereYouSuccessfulWithYourSt3ApplicationInThisApplicationRound)["No"]`/`r sum(survey$DidYouApplyForAnSt3AnaestheticsPostToCommenceInAugust2021 == "Yes", na.rm = TRUE)` (`r table(survey$WereYouSuccessfulWithYourSt3ApplicationInThisApplicationRound)["No"]/ sum(survey$DidYouApplyForAnSt3AnaestheticsPostToCommenceInAugust2021 == "Yes", na.rm = TRUE) * 100`%) were unsuccessful with their application. 
+
+Our survey therefore represents data from `r sum(survey$DidYouApplyForAnSt3AnaestheticsPostToCommenceInAugust2021 == "Yes", na.rm = TRUE)/1056 * 100`% of the 1,056 candidates who applied, or alternatively, `r table(survey$WereYouSuccessfulWithYourSt3ApplicationInThisApplicationRound)["No"]/ (1056-359) * 100`% of the `r 1056-359` candidates who were unsuccessful in obtaining an ST3 post in this application round.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=6, fig.align='center', fig.cap='Figure 1: Flowchart of responses included in analysis.'}
+## ----fig_1_STROBE, echo=FALSE, message=FALSE, warning=FALSE, fig.height=6, fig.align='center', fig.cap='Figure 1: Flowchart of cases included and excluded from analysis.'----
+#Set up the contents for each box
+a1 <- paste0('Total responses\n',
+             '(n = ',
+             formatC(strobe_table$N[1], big.mark = ','), 
+             ')')
+b1 <- ''
+c1 <- paste0('Responses included in analysis\n(n = ',
+             formatC(strobe_table$N[2], big.mark = ','),
+             ')')
+d1 <- ''
+e1 <- paste0('Applied to ST3 posts\n(n = ',
+             formatC(sum(survey_clean$DidYouApplyForAnSt3AnaestheticsPostToCommenceInAugust2021 == "Yes"), big.mark = ','),
+             ')')
+
+f1a <- paste0('Offered ST3 Anaesthetic post\n(n = ',
+             formatC(sum(survey_clean$WereYouSuccessfulWithYourSt3ApplicationInThisApplicationRound == "Yes", na.rm = TRUE), big.mark = ','),
+             ')')
+
+f1b <-  paste0('Not offered ST3 Anaesthetic post\n(n = ',
+             formatC(sum(survey_clean$WereYouSuccessfulWithYourSt3ApplicationInThisApplicationRound == "No", na.rm = TRUE), big.mark = ','),
+             ')')
+
+a2 <- ''
+b2 <- paste0('Excluded:\nIneligible to apply to ST3 posts\n(n = ',
+             formatC(strobe_table$N[1] - strobe_table$N[2], big.mark = ','),
+             ')')
+c2 <- ''
+d2 <- paste0('Did not apply to ST3\n(n = ',
+             formatC(sum(survey_clean$DidYouApplyForAnSt3AnaestheticsPostToCommenceInAugust2021 == "No"), big.mark = ','),
+             ')\n')
+e2 <- ''
+
+ndf <- create_node_df(
+  n = 12,
+  label = c(a1, b1, c1, d1, e1, #Column 1
+            a2, b2, c2, d2, e2, #Column 2
+            f1a, f1b), 
+  style = c('solid', 'invis', 'solid', 'invis', 'solid', #Column 1
+            'invis', 'solid', 'invis', 'solid', 'invis', #Column 2
+            'solid', 'solid'), 
+  shape = c('box', 'point', 'box', 'point', 'box',  #Column 1 
+            'plaintext', 'box', 'point', 'box', 'point', #Column 2
+            'box', 'box'), 
+  width = c(3, 0.001, 3, 0.001, 3, #Column 1
+            2, 3, 0.001, 3, 0.001,  #Column 2
+            3, 3),
+  height = c(1, 0.001, 1, 0.001, 1, #Column 1
+             1, 1, 0.001, 1, 0.001, #Column 2
+             1, 1), 
+  fontsize = c(rep(14, 12)),
+  fontname = c(rep('Helvetica', 12)),
+  penwidth = 1.5,
+  fixedsize = 'true')
+
+edf <- create_edge_df(
+  from = c(1, 2, 3, 4, #Column 1
+           6, 7, 8, 9, #Column 2
+           2, 4, #Horizontals
+           5, 5),
+  to = c(2, 3, 4, 5, #Column 1
+         7, 8, 9, 10, #Column 2
+         7, 9, #Horizontals
+         11, 12),
+  arrowhead = c('none', 'normal', 'none', 'normal', #Column 1
+                'none', 'none', 'none', 'none', #Column 2
+                'normal', 'normal', #Horizontals
+                'normal', 'normal'),
+  color = c('black', 'black', 'black', 'black', #Column 1
+            '#00000000', '#00000000', '#00000000', '#00000000', #Column 2
+            'black', 'black', #Horizontals
+            'black', 'black'),
+  constraint = c(rep('true', 8), #Columns
+                 rep('false', 2), #Horizontals
+                 rep('true', 2))
+)
+  
+g <- create_graph(ndf,
+                  edf,
+                  attr_theme = NULL)
+
+#render_graph(g)
+
+export_graph(g, file_name = "../outputs/figures/Fig_1_strobe.png", width = 1200)
+
+export_graph(g, file_name = "../outputs/figures/Fig_1_strobe.pdf")
+
+knitr::include_graphics("../outputs/figures/Fig_1_strobe.png")
+
+```
+
+## Demographics
+
+The baseline demographics of respondents are reported in Table 1. The majority of respondents were over the age of 30 (`r nrow(survey_clean %>% filter(WhatIsYourAge != "25-30"))`/`r nrow(survey_clean)` = `r nrow(survey_clean %>% filter(WhatIsYourAge != "25-30"))/nrow(survey_clean) * 100`%) and reported their sex as Male (`r nrow(survey_clean %>% filter(WhatIsYourSex == "Male"))`/`r nrow(survey_clean)` = `r nrow(survey_clean %>% filter(WhatIsYourSex == "Male"))/nrow(survey_clean) * 100`%). We received responses from all postgraduate training regions across the UK. The median (IQR) number of years of clinical experience in anaesthesia completed by August 2021 reported by respondents was `r median(survey_clean$HowManyYearsOfClinicalExperienceInAnaesthesiaWouldYouHaveCompletedByAugust2021, na.rm=TRUE)` (`r quantile(survey_clean$HowManyYearsOfClinicalExperienceInAnaesthesiaWouldYouHaveCompletedByAugust2021, na.rm=TRUE, 0.25)` to `r quantile(survey_clean$HowManyYearsOfClinicalExperienceInAnaesthesiaWouldYouHaveCompletedByAugust2021, na.rm=TRUE, 0.75)`), however a quarter of respondents reported between `r quantile(survey_clean$HowManyYearsOfClinicalExperienceInAnaesthesiaWouldYouHaveCompletedByAugust2021, na.rm=TRUE, 0.75)` and `r max(survey_clean$HowManyYearsOfClinicalExperienceInAnaesthesiaWouldYouHaveCompletedByAugust2021)` years of experience (Figure 2).
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+CreateTableOne(data = survey_clean,
+               vars = c("WhatIsYourAge",
+                        "WhatIsYourSex",
+                        "WhichRegionAreYouCurrentlyWorkingIn",
+                        "WhatIsYourCurrentRole",
+                        "HowManyYearsOfClinicalExperienceInAnaesthesiaWouldYouHaveCompletedByAugust2021",
+                        "WhatIsYourCurrentContractedWorkingPattern")) %>%
+  print(printToggle = FALSE, nonnormal = "HowManyYearsOfClinicalExperienceInAnaesthesiaWouldYouHaveCompletedByAugust2021") %>%
+  pander::pander("Table 1: Respondent demographics")
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.cap='Figure 2: Distribution of years of clinical anaesthesia experience reported by respondents.', dpi = 600}
+survey_clean %>%
+  ggplot(aes(x = HowManyYearsOfClinicalExperienceInAnaesthesiaWouldYouHaveCompletedByAugust2021)) +
+  geom_histogram(binwidth = 2) +
+  theme_classic() +
+  labs(x = "Years of Clinical Anaesthesia Experience Reported",
+       y = "Frequency (n)")
+ggsave("../outputs/figures/Fig_2.pdf", device = cairo_pdf, width = 4, height = 3, units = "in")
+```
+
+## ST3 Applications Outcomes
+
+Of the `r sum(survey_clean$DidYouApplyForAnSt3AnaestheticsPostToCommenceInAugust2021 == "Yes")` survey respondents that applied to ST3 anaesthetic posts, `r sum(survey_clean$WereYouSuccessfulWithYourSt3ApplicationInThisApplicationRound == "Yes", na.rm = TRUE)` respondents (`r sum(survey_clean$WereYouSuccessfulWithYourSt3ApplicationInThisApplicationRound == "Yes", na.rm = TRUE)/sum(survey_clean$DidYouApplyForAnSt3AnaestheticsPostToCommenceInAugust2021 == "Yes") * 100`%) were successfully offered posts, while `r sum(survey_clean$WereYouSuccessfulWithYourSt3ApplicationInThisApplicationRound == "No", na.rm = TRUE)` respondents (`r sum(survey_clean$WereYouSuccessfulWithYourSt3ApplicationInThisApplicationRound == "No", na.rm = TRUE)/sum(survey_clean$DidYouApplyForAnSt3AnaestheticsPostToCommenceInAugust2021 == "Yes") * 100`%) were not.
+
+```{r eval=FALSE, fig.cap='Figure', message=FALSE, warning=FALSE, include=FALSE}
+survey_clean %>% filter(DidYouApplyForAnSt3AnaestheticsPostToCommenceInAugust2021 == "Yes") %>%
+  mutate(HowManyYearsOfClinicalExperienceInAnaesthesiaWouldYouHaveCompletedByAugust2021 = round(HowManyYearsOfClinicalExperienceInAnaesthesiaWouldYouHaveCompletedByAugust2021)) %>%
+  count(Years = factor(HowManyYearsOfClinicalExperienceInAnaesthesiaWouldYouHaveCompletedByAugust2021), Success = factor(WereYouSuccessfulWithYourSt3ApplicationInThisApplicationRound)) %>% 
+  group_by(Years) %>%
+  mutate(pct = n/sum(n)) %>%
+  ggplot(data = ., aes(fill = Success, x = Years, y = n)) +
+    geom_col() +
+    geom_text(aes(label = paste0(round(pct * 100, 1), "%")), position = position_stack(vjust = 0.5), size = 3)
+```
+
+`r sum(survey_clean$HaveYouAcceptedAnSt3AnaestheticsPostToCommenceInAugust2021 == "No", na.rm = TRUE)` respondents were offered an ST3 post but turned down their offer, citing reasons including: 
+
+> Issues with location of the offer (7 responses).
+
+> Accepting an offer in another specialty instead (4 responses).
+
+> Electing to pursue training in another country (1 response).
+
+One notable quote from this group of respondents: 
+
+>"After careful consideration, I have chosen to finish my training outside of the UK. I feel that a return to the NHS would entail significantly worse hours, pay, commutes, and working conditions - together with significantly longer training times. I would see my new daughter at least 2500 hours less over the next six years, and earn ~£300K less over the same period. In addition, HEE’s conduct during the recruitment process - which was unfair, inconsistent, free from accountability, and treated trainees disgracefully - has reinforced to me that national training programmes and the bodies which oversea [sic] them are fundamentally toxic, and unfit for purpose."
+
+## Reasons for not applying in this ST3 application round
+
+`r sum(survey_clean$DidYouApplyForAnSt3AnaestheticsPostToCommenceInAugust2021 == "No")` respondents reported not applying during this ST3 recruitment round. The top 5 reasons cited were (respondents could offer more than one reason):
+
+> Awareness of increased competition ratios and/or reduced CV opportunities during COVID (`r str_detect(survey_clean$WhatWasYourReasonForNotApplying, "Awareness of increased competition ratios and/or reduced CV opportunities during COVID") %>% sum(na.rm = TRUE)` responses [`r str_detect(survey_clean$WhatWasYourReasonForNotApplying, "Awareness of increased competition ratios and/or reduced CV opportunities during COVID") %>% sum(na.rm = TRUE)/sum(survey_clean$DidYouApplyForAnSt3AnaestheticsPostToCommenceInAugust2021 == "No") * 100`%])
+
+> Wanting to take a break from training (`r str_detect(survey_clean$WhatWasYourReasonForNotApplying, "Wanted to take a break from training") %>% sum(na.rm = TRUE)` responses [`r str_detect(survey_clean$WhatWasYourReasonForNotApplying, "Wanted to take a break from training") %>% sum(na.rm = TRUE)/sum(survey_clean$DidYouApplyForAnSt3AnaestheticsPostToCommenceInAugust2021 == "No") * 100`%])
+
+> Wanting to pursue other interests or opportunities, e.g. research or management, etc. (`r str_detect(survey_clean$WhatWasYourReasonForNotApplying, "Wanted to pursue other interests or opportunities, e.g. research or management, etc.") %>% sum(na.rm = TRUE)` responses [`r str_detect(survey_clean$WhatWasYourReasonForNotApplying, "Wanted to pursue other interests or opportunities, e.g. research or management, etc.") %>% sum(na.rm = TRUE)/sum(survey_clean$DidYouApplyForAnSt3AnaestheticsPostToCommenceInAugust2021 == "No") * 100`%])
+
+> Lacking core experience due to the COVID-19 pandemic (`r str_detect(survey_clean$WhatWasYourReasonForNotApplying, "Lack of core experience due to the COVID-19 pandemic") %>% sum(na.rm = TRUE)` responses [`r str_detect(survey_clean$WhatWasYourReasonForNotApplying, "Lack of core experience due to the COVID-19 pandemic") %>% sum(na.rm = TRUE)/sum(survey_clean$DidYouApplyForAnSt3AnaestheticsPostToCommenceInAugust2021 == "No") * 100`%])
+
+> Planning to pursue training abroad (2 responses [`r 2/sum(survey_clean$DidYouApplyForAnSt3AnaestheticsPostToCommenceInAugust2021 == "No") * 100`%])
+
+Some notable quotes from this group of trainees:
+
+> "Applications opened almost immediately after primary viva and was too exhausted to launch straight in to all of the preparation required."
+
+> "Didn’t realise there would be a freeze on recruitment and felt I needed more Obstetric and Paediatric experience before becoming a registrar."
+
+> "Am very unlikely to succeed in the modern tick-box environment of our specialty and our profession, so will likely be leaving medicine."
+
+> "Missed application window. Stressed/overwhelmed with COVID and exams."
+
+> "Love the job but find the environment, constant rotation, lack of autonomy in training very difficult and need a break to decide about whether to pursue a different career or keep going. I don’t think systems in place adequately support trainees to balance work stress against health."
+
+`r sum(survey_clean$AtTheTimeOfSt3ApplicationWereYouAwareOfThePlannedBreakInRecruitmentFromAugust2022 == "No", na.rm = TRUE)`/`r sum(survey_clean$DidYouApplyForAnSt3AnaestheticsPostToCommenceInAugust2021 == "No")` of the respondents (`r sum(survey_clean$AtTheTimeOfSt3ApplicationWereYouAwareOfThePlannedBreakInRecruitmentFromAugust2022 == "No", na.rm = TRUE)/ sum(survey_clean$DidYouApplyForAnSt3AnaestheticsPostToCommenceInAugust2021 == "No") * 100`%) who did not apply in this ST3 application round were not aware that there was a planned freeze in ST3 recruitment from August 2022. While `r sum(survey_clean$DidYouFeelTheEffectsOfCurriculumChangesOnRecruitmentWereWellExplainedToYouPriorToTheSt3ApplicationDeadline == "No", na.rm = TRUE)`/`r sum(survey_clean$DidYouApplyForAnSt3AnaestheticsPostToCommenceInAugust2021 == "No")` of the respondents (`r sum(survey_clean$DidYouFeelTheEffectsOfCurriculumChangesOnRecruitmentWereWellExplainedToYouPriorToTheSt3ApplicationDeadline == "No", na.rm = TRUE)/ sum(survey_clean$DidYouApplyForAnSt3AnaestheticsPostToCommenceInAugust2021 == "No") * 100`%) did not feel the effects of the curriculum changes on ST3 recruitment were well-explained to them prior to the ST3 application deadline (Table 2). Similarly, `r sum(survey_clean$WouldMoreInformationRegardingChangesToTheCurriculumAndRecruitmentHaveChangedYourDecisionNotToApply == "Yes", na.rm = TRUE)`/`r sum(survey_clean$DidYouApplyForAnSt3AnaestheticsPostToCommenceInAugust2021 == "No")` of the respondents (`r sum(survey_clean$WouldMoreInformationRegardingChangesToTheCurriculumAndRecruitmentHaveChangedYourDecisionNotToApply == "Yes", na.rm = TRUE)/ sum(survey_clean$DidYouApplyForAnSt3AnaestheticsPostToCommenceInAugust2021 == "No") * 100`%) felt that more information regarding changes to the curriculum and recruitment may have changed their decision about not applying during this round.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, }
+survey_clean %>%
+  select(DidYouFeelTheEffectsOfCurriculumChangesOnRecruitmentWereWellExplainedToYouPriorToTheSt3ApplicationDeadline,
+         WouldMoreInformationRegardingChangesToTheCurriculumAndRecruitmentHaveChangedYourDecisionNotToApply) %>%
+  drop_na() %>%
+  mutate_all(factor) %>%
+  as.data.frame() %>%
+  likert::likert() %>%
+  print() %>%
+  pander("Table 2: Responses to questions around curriculum changes.")
+```
+
+## Future plans
+
+A total of `r sum(!is.na(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply))` respondents either did not apply for ST3 despite being eligible, or applied for ST3 and were not offered a post, or applied for ST3 and were offered a post which they turned down. These respondents represented `r sum(!is.na(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply))/nrow(survey_clean) * 100`% of the total responses (n = `r nrow(survey_clean)`) included in analysis, and signify the cohort of anaesthetists for whom planning for the next 2 years during the transition to the new 2021 Anaesthetic Curriculum is associated with uncertainty.
+
+These respondents were asked about their plans for the next 12 to 24 months from August 2021 as they did not have an ST3 Anaesthetic post secured. Respondents were allowed to specify more than one possible plan.
+
+The majority of respondents expressed a plan to take up either CT3 top-up posts or Non-training fellow posts from August 2021 (`r str_detect(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply, "CT3 top-up post|Non-training fellow post") %>% sum(na.rm = TRUE)`/ `r sum(!is.na(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply))` = `r str_detect(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply, "CT3 top-up post|Non-training fellow post") %>% sum(na.rm = TRUE)/sum(!is.na(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply)) * 100`%). These were followed in descending orders of frequency by pursuing work abroad (n = `r str_detect(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply, "Work abroad") %>% sum(na.rm = TRUE)`, `r str_detect(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply, "Work abroad") %>% sum(na.rm = TRUE)/sum(!is.na(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply)) * 100`%), embarking on a career break (n = `r str_detect(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply, "Career break") %>% sum(na.rm = TRUE)`, `r str_detect(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply, "Career break") %>% sum(na.rm = TRUE)/sum(!is.na(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply)) * 100`%), taking up an ST3 post in Intensive Care Medicine in August 2021 (n = `r str_detect(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply, "ICM ST3 post") %>% sum(na.rm = TRUE)`, `r str_detect(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply, "ICM ST3 post") %>% sum(na.rm = TRUE)/sum(!is.na(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply)) * 100`%) and permanently leaving the medical profession (n = `r str_detect(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply, "Permanently leaving the medical profession") %>% sum(na.rm = TRUE)`, `r str_detect(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply, "Permanently leaving the medical profession") %>% sum(na.rm = TRUE)/sum(!is.na(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply)) * 100`%).
+
+A number of respondents further expressed a desire to pursue training in a different medical specialty (n = `r str_detect(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply, "Pursue training in a different specialty - specify below") %>% sum(na.rm = TRUE)`, `r str_detect(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply, "Pursue training in a different specialty - specify below") %>% sum(na.rm = TRUE)/sum(!is.na(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply)) * 100`%), with possible destination specialties including Intensive Care Medicine, General Practice and Emergency Medicine cited. Some respondents expressed an intention to pursue a further education or research (n = `r str_detect(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply, "Further education|research") %>% sum(na.rm = TRUE)`, `r str_detect(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply, "Further education|research") %>% sum(na.rm = TRUE)/sum(!is.na(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply)) * 100`%). A small number of respondents whose existing roles were as Specialty/SAS Doctors expressed a plan to continue in that role (n = `r str_detect(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply, "specility|Speciality|Specialty Doctor|SAS grade|SAS doctor") %>% sum(na.rm = TRUE)`), and a similar number expressed a plan to pursue Specialty Registration via the Certificate of Eligibility for Specialist Registration (CESR) route (n = `r str_detect(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply, "cesr|Cesr|CESR") %>% sum(na.rm = TRUE)`).
+
+A large proportion of respondents expressed a lack of confidence in being able to achieve the necessary training requirements to later apply for ST4 in August 2023, and ultimately achieving GMC Specialty Registration in Anaesthesia without a training number (Figure 3). A substantial number of respondents expressed that their wider life plans have suffered distruption due to the impending time out of training (`r sum(survey$HasTheTimeOutOfATrainingProgrammeAffectedAnyOfYourWiderLifePlansEGMovingLocationFamilyPlanningBuyingAHouse == "Yes", na.rm = TRUE)`/`r sum(!is.na(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply))` = `r sum(survey$HasTheTimeOutOfATrainingProgrammeAffectedAnyOfYourWiderLifePlansEGMovingLocationFamilyPlanningBuyingAHouse == "Yes", na.rm = TRUE)/sum(!is.na(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply)) * 100`%).
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, dpi=600, fig.height=6, fig.width=10, fig.cap='Figure 3: Responses to questions about future plans.'}
+survey_clean %>%
+  select(`Do you feel confident or assured that you will be able to achieve the necessary competencies to apply for ST4 in August 2023?` = DoYouFeelConfidentOrAssuredThatYouWillBeAbleToAchieveTheNecessaryCompetenciesToApplyForSt4InAugust2023,
+         `Has the time out of a training programme affected any of your wider life plans?` = HasTheTimeOutOfATrainingProgrammeAffectedAnyOfYourWiderLifePlansEGMovingLocationFamilyPlanningBuyingAHouse,
+         `Are you confident that you will be able to achieve GMC Specialty Registration in Anaesthesia without a training number?`= HowConfidentAreYouThatYouWillBeAbleToAchieveGmcRegistrationOnTheSpecialtyRegisterInAnaesthesiaWithoutATrainingNumber) %>%
+  drop_na() %>%
+  mutate(`Do you feel confident or assured that you will be able to achieve the necessary competencies to apply for ST4 in August 2023?` = recode(`Do you feel confident or assured that you will be able to achieve the necessary competencies to apply for ST4 in August 2023?`,
+                                                                                                                                                  `Don't know` = "Don't know/Not sure"),
+         `Has the time out of a training programme affected any of your wider life plans?` = recode(`Has the time out of a training programme affected any of your wider life plans?`,
+                                                                                                    `Don't know` = "Don't know/Not sure"),
+         `Are you confident that you will be able to achieve GMC Specialty Registration in Anaesthesia without a training number?` = recode(`Are you confident that you will be able to achieve GMC Specialty Registration in Anaesthesia without a training number?`,
+                                                                                                                                            `Not sure` = "Don't know/Not sure",
+                                                                                                                                            `Confident` = "Yes",
+                                                                                                                                            `Not confident` = "No")) %>%
+  mutate(`Do you feel confident or assured that you will be able to achieve the necessary competencies to apply for ST4 in August 2023?` = factor(`Do you feel confident or assured that you will be able to achieve the necessary competencies to apply for ST4 in August 2023?`, levels = c("Yes", "Don't know/Not sure", "No"), ordered = TRUE),
+         `Has the time out of a training programme affected any of your wider life plans?` = factor(`Has the time out of a training programme affected any of your wider life plans?`, levels = c("Yes", "Don't know/Not sure", "No"), ordered = TRUE),
+        `Are you confident that you will be able to achieve GMC Specialty Registration in Anaesthesia without a training number?` = factor(`Are you confident that you will be able to achieve GMC Specialty Registration in Anaesthesia without a training number?`, levels = c("Yes", "Don't know/Not sure", "No"), ordered = TRUE)) %>%
+  as.data.frame() %>%
+  likert::likert() %>%
+  plot()
+ggsave("../outputs/figures/Fig_3.pdf", device = cairo_pdf, width = 10, height = 6, units = "in")
+```
+
+## Sentiments of free-text responses
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+library(sentimentr)
+
+text_df <- survey_clean %>%
+  select(ID, text = WhatGeneralConcernsWouldYouLikeToShareWithUsRegardingThisYearsSt3ApplicationsIfThereAreSpecificPersonalCircumstancesYouAreHappyToShareWithTheRelevantStakeholdersPleaseFeelFreeToContributeThemHereWeMayPublishSomeOfTheseAsAnonymisedQuotesToConveyTheDepthOfFeelingAroundThisIssue)
+
+sentences_text_df <- text_df %>%
+  get_sentences() 
+
+sentiments_text_df <- sentiment(sentences_text_df) %>%
+  drop_na %>%
+  group_by(ID) %>%
+  summarise(ave_sentiment = mean(sentiment)) %>%
+  left_join(text_df, by = "ID")
+```
+
+We allowed respondents the opportunity to describe their thoughts about the ST3 recruitment process in their own words via a free-text box at the end of the survey. They were asked, "What general concerns would you like to share with us regarding this year's ST3 applications? If there are specific personal circumstances you are happy to share with the relevant stakeholders, please feel free to contribute them here. We may publish some of these as anonymised quotes to convey the depth of feeling around this issue."
+
+We received a total of `r sum(!is.na(survey_clean$WhatGeneralConcernsWouldYouLikeToShareWithUsRegardingThisYearsSt3ApplicationsIfThereAreSpecificPersonalCircumstancesYouAreHappyToShareWithTheRelevantStakeholdersPleaseFeelFreeToContributeThemHereWeMayPublishSomeOfTheseAsAnonymisedQuotesToConveyTheDepthOfFeelingAroundThisIssue))` free-text responses to this question (see Supplementary Material and online [https://dannyjnwong.shinyapps.io/ST3RecruitmentSurvey/] for quotes). 
+
+The responses with the largest magnitude (most negative or most positive) sentiment scores as calculated by Rinker's method were identified and highlighted in Table 3 (most negative sentiment scores) and Table 4 (most positive sentiment scores). The sentiment of the free-text responses was overall negative, with a mean (SD) score across all available responses of `r mean(sentiments_text_df$ave_sentiment)` (`r sd(sentiments_text_df$ave_sentiment)`), and a median (IQR) of `r median(sentiments_text_df$ave_sentiment)` (`r quantile(sentiments_text_df$ave_sentiment, 0.25)` to `r quantile(sentiments_text_df$ave_sentiment, 0.75)`). This suggested that responses to this question conveyed a generally negative sentiment. A range of topics were elicited in the free-text responses by the authors on hand-searching following sentiment analysis screening (Table 5). 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+sentiments_text_df %>% 
+  arrange(ave_sentiment) %>% 
+  select("Average sentiment score" = ave_sentiment, "Quote" = text) %>% 
+  head(5) %>%
+  pander("Table 3: Top 5 free-text quotes that produced the most negative sentiment scores.")
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+sentiments_text_df %>% 
+  arrange(desc(ave_sentiment)) %>% 
+  select("Average sentiment score" = ave_sentiment, "Quote" = text) %>% 
+  head(5) %>%
+  pander("Table 4: Top 5 free-text quotes that produced the most positive sentiment scores.")
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+table5 <- data.frame(`Responses mentioning` = c("Fairness", "Wellbeing, burnout and mental health", "Communication", "Curriculum changes", "Feeling supported versus abandonment"),
+                     `Number of responses` = c(str_detect(survey_clean$WhatGeneralConcernsWouldYouLikeToShareWithUsRegardingThisYearsSt3ApplicationsIfThereAreSpecificPersonalCircumstancesYouAreHappyToShareWithTheRelevantStakeholdersPleaseFeelFreeToContributeThemHereWeMayPublishSomeOfTheseAsAnonymisedQuotesToConveyTheDepthOfFeelingAroundThisIssue, "(?i)fair|(?i)unfair|(?i)not fair") %>% sum(na.rm = TRUE), 
+                                               str_detect(survey_clean$WhatGeneralConcernsWouldYouLikeToShareWithUsRegardingThisYearsSt3ApplicationsIfThereAreSpecificPersonalCircumstancesYouAreHappyToShareWithTheRelevantStakeholdersPleaseFeelFreeToContributeThemHereWeMayPublishSomeOfTheseAsAnonymisedQuotesToConveyTheDepthOfFeelingAroundThisIssue, "(?i)welfare|(?i)wellbeing|(?i)stress|(?i)stressful|(?i)burnout|(?i)anxiety|(?i)mental health") %>% sum(na.rm = TRUE),
+                                               str_detect(survey_clean$WhatGeneralConcernsWouldYouLikeToShareWithUsRegardingThisYearsSt3ApplicationsIfThereAreSpecificPersonalCircumstancesYouAreHappyToShareWithTheRelevantStakeholdersPleaseFeelFreeToContributeThemHereWeMayPublishSomeOfTheseAsAnonymisedQuotesToConveyTheDepthOfFeelingAroundThisIssue, "(?i)communication") %>% sum(na.rm = TRUE),
+                                               str_detect(survey_clean$WhatGeneralConcernsWouldYouLikeToShareWithUsRegardingThisYearsSt3ApplicationsIfThereAreSpecificPersonalCircumstancesYouAreHappyToShareWithTheRelevantStakeholdersPleaseFeelFreeToContributeThemHereWeMayPublishSomeOfTheseAsAnonymisedQuotesToConveyTheDepthOfFeelingAroundThisIssue, "(?i)curriculum") %>% sum(na.rm = TRUE),
+                                               str_detect(survey_clean$WhatGeneralConcernsWouldYouLikeToShareWithUsRegardingThisYearsSt3ApplicationsIfThereAreSpecificPersonalCircumstancesYouAreHappyToShareWithTheRelevantStakeholdersPleaseFeelFreeToContributeThemHereWeMayPublishSomeOfTheseAsAnonymisedQuotesToConveyTheDepthOfFeelingAroundThisIssue, "(?i)support|(?i)let down|(?i)abandon") %>% sum(na.rm = TRUE))
+                  )
+table5 <- table5 %>%
+  mutate(`% of responses` = `Number.of.responses`/sum(!is.na(survey_clean$WhatGeneralConcernsWouldYouLikeToShareWithUsRegardingThisYearsSt3ApplicationsIfThereAreSpecificPersonalCircumstancesYouAreHappyToShareWithTheRelevantStakeholdersPleaseFeelFreeToContributeThemHereWeMayPublishSomeOfTheseAsAnonymisedQuotesToConveyTheDepthOfFeelingAroundThisIssue)) * 100)
+
+table5 %>% arrange(desc(Number.of.responses)) %>% pander(paste0("Table 5: Topics elicited from free-text responses (total free-text reponses received, n = ", sum(!is.na(survey_clean$WhatGeneralConcernsWouldYouLikeToShareWithUsRegardingThisYearsSt3ApplicationsIfThereAreSpecificPersonalCircumstancesYouAreHappyToShareWithTheRelevantStakeholdersPleaseFeelFreeToContributeThemHereWeMayPublishSomeOfTheseAsAnonymisedQuotesToConveyTheDepthOfFeelingAroundThisIssue)), ")."))
+```
+
+# Discussion
+
+A large proportion of applicants have been unsuccessful in the most recent round of ST3 Anaesthetic applications. This follows a particularly difficult year for the NHS where doctors-in-training from all specialties, especially anaesthetics, have faced significant disruption to their training in both reductions in elective lists and redeployment or supporting roles in intensive care. It is postulated that multiple factors have contributed to the increased ST3 competition ratios this year. These may include relaxation of previous requirements to secure the full Primary FRCA to apply to intermediate and higher training, a reduction in trainees seeking temporary work abroad and anticipation of a freeze in recruitment. Therefore, trainees may have seen this round as the final opportunity to enter training for 2 years with only a limited round of recruitment in February 2022. The results of the survey highlighted important themes &mdash; some specific to this year’s ST3 application round, but also some wider general training themes that should be further discussed in order to guide future recruitment.
+
+Our survey reports data from approximately half of the 1056 candidates who applied, and a third of the 697 candidates who were unsuccessful in obtaining an ST3 post in this application round. Around a third of respondents included in this analysis have accepted an ST3 post, while around two thirds of respondents did not. The Royal College of Anaesthetists quoted a 34% applicant success rate for this application round. This parity suggests acceptable external validity of our study, and further suggests that we avoided sampling bias based on whether respondents were successful with their ST3 application. We gained responses from across all UK health boards, with the majority of respondents being males aged between 25 and 35. Only 5 respondents currently work outside the UK. Notably, while increased competition was cited as a reason for many going without job offers, over 30 of our respondents cited anticipated increased competition as a reason for avoiding application this year. 
+
+It was necessary to alter the recruitment format this year in order to respect social distancing and a potential reduction in available consultant interviewers. This followed a previously disrupted recruitment round in 2020 which saw applicants appointed on unverified self-assessment scores. Many respondents commented on the combination of what they thought were vague instructions for the self-scoring assessment and a virtual interview. One wrote that "...30 minutes by 2 consultants about non clinical experience &mdash; hardly a way to interview for future consultants". This sentiment was repeated multiple times in free-text responses, and suggests a feeling among respondents that the recruitment process was "unfair, inconsistent, and free from accountability". Whilst trainees accepted reasons why the recruitment format needed to alter this year, many respondents cited the experience as negatively affecting their faith in the recruitment process, and the bodies that govern it.
+
+A major theme of the free-text responses was the negative impact of this recruitment process on trainee wellbeing. Approximately 4 out of 5 respondents told us that their life plans had been negatively affected by this year’s recruitment issues. Respondents described it as "stressful" especially due to its "impact on major life decisions/family planning/dependencies". Many described worsening "feelings of burnout". There is an existing large body of evidence that anaesthetic trainees are especially susceptible to work-related stress, burnout, and depression [@looseley_stress_2019; @larsson_being_2006]. Indeed, one respondent commented on it being "extraordinary that under the current system various parties involved in training will with one hand promote wellbeing initiatives, and with the other be complicit in trainees abandoning their friends/family/social support structures when national recruitment schemes require them to move hundreds of miles for jobs to continue training."  The already recognised stressful characteristics of anaesthetic training are amongst the many things which have intensified over the last 12 months, especially in relation to ST3 recruitment. Anaesthetic trainees have been instrumental in the COVID-19 pandemic response, due to the skills they possess which made them suitable for redeployment onto Intensive Care Units with ventilated COVID-19 patients that experienced high mortality rates. The compounding negative impact this recruitment has added to the effects of a difficult 12 months are summarised by one respondent, "After diligently propping up surge ICUs, and caring for critically-ill COVID patients, the NHS has treated anaesthetists-in-training as single-use, disposable, items &mdash; burning them out on surge rosters when needed, and then casually discarding them, and leaving them without jobs or careers, when not". Similar findings were reflected in the recently published report by the House of Commons' Health and Social Care Committee on the "emergency" level of burnout reached in health and social care workers [@health_and_social_care_committee_workforce_2021]. The resulting feelings of burnout and clinical fatigue are linked with future poor patient care, worsened clinical outcomes, and increased risk of medical error [@west_association_2009].
+
+Prior to the pandemic, there were already significant waiting lists for elective operating. This has been further exacerbated by the necessary extended cancellation of many elective procedures over the last year [@fowler_can_2021; @fowler_resource_2021]. In March 2021, only 64.4% of patients in England awaiting surgical treatment were seen within 18 weeks [@debbie_moon_statistical_2021]. The government’s 92% target has not been met since February 2016 [@anita_charlesworth_returning_2020]. Notably, over 430,000 patients in England have been waiting over a year for surgical treatment. The Royal College of Surgeons of England published a report on the New Deal for Surgery which estimates an annual average 11% increase in the number of NHS elective procedures performed every year in order to meet the 18 week waiting time target by 2023/24 . The report states that this increase will require 4,000 extra surgical consultants [@royal_college_of_surgeons_england_new_2021]. Outside this potential increase in surgical workload, the Royal College of Anaesthetists already estimates that an extra 600-700 anaesthetic trainees will be required over the next seven years in order to meet expected baseline future workforce demands [@royal_college_of_anaesthetists_medical_2020]. The House of Commons' Health and Social Care Committee have stated that it is "clear that workforce planning has been led by the funding envelope available to health and social care rather than by demand and the capacity required to service that demand." Their recent report on burnout in the NHS points to future uncertainty in workforce planning and lack of a formal solution as a major contributor to significant stress within the workforce [@health_and_social_care_committee_workforce_2021]. 
+
+However, in the face of these requirements, the future ripple effect of this year’s recruitment has produced some concerning indicators. One in 10 of respondents expressed desire to pursue training in a different medical specialty as a direct result of their treatment this year. Approximately 1 in 5 said they would seek work abroad, and 1 in 10 indicated that they were planning to permanently leave medicine altogether.
+
+A total of `r sum(!is.na(survey_clean$WhatAreYourPotentialPlansForTheUpcoming1_2YearsSelectAllThatApply))` respondents did not take up ST3 posts for various reasons, including: not applying for ST3 despite being eligible, applying for ST3 but were not offered a post, or applying for ST3 but turning down a post offered. Of those, the survey revealed that the majority of respondents expressed a plan to take up either CT3 top-up posts or non-training fellow posts from August 2021 (approximately 80%) as first priority plan for future job. However, these individuals raised concerns regarding the information they have received about these posts. Some respondents expressed desire for "clear guidance" as to requirements. Whilst there is recognition that relevant bodies had produced guidance, some respondents noted that this was not communicated effectively and lacked the necessary clarity. There were also concerns amongst those undertaking CT3 posts that "...training opportunities to achieve these competencies will not be easy to come by...". Working alongside trainees in programme, there are no assurances provided that the training needs of those in CT3 top-up posts will be equitable within the department. There is no formal recourse for these trainees to highlight training issues, as  governing bodies ultimately have no authority over trusts and departments to ensure they deliver what they have recommended in their guidance. This was reflected in one respondent's experience as a non-training fellow, "expecting anaesthetic departments to treat fellows out of training equally to trainees and facilitate the top-up competencies, despite no funding, is idealistic". Some respondents felt that if the CT3 top up posts were centrally co-ordinated, this would be more equitable and avoid discrepancies between different areas of the UK and Schools of Anaesthesia.
+
+Only a small number of survey respondents stated they would pursue CESR (Certificate of Eligibility of Specialist Registration) accreditation. This may be a suitable option for "...experienced anaesthetists from abroad (who) have lots of experience to offer our NHS and they should have the opportunity to become UK consultants...". Some respondents did express they wanted more information about the CESR pathway but highlighted concerns about the process as they felt it was "clunky and tiresome". These responses reflect a lack of familiarity with the CESR process amongst UK trainees. Indeed, this process itself is currently increasingly complex with the need to bridge between the 2010 and 2021 curricula [@royal_college_of_anaesthetists_cesr_2021; @simon_fletcher_certificate_2020]. Independent collection and presentation of evidence for CESR assessment can easily result in collation of between 800-1,000 pieces of evidence collected and submitted by the individual without an infrastructure of assistance and supervision supplied when enrolled in UK specialty training. CESR also inherently asks for significant flexibility and clinical investment from the health trust that the individual is working within. This is something which is likely to have significant regional variation.
+
+In the free-text responses, 44 respondents make reference to "poor communication" of the changes to recruitment and the selection process. Trainees described the process as "opaque" and "confusing" during a time of such significant change to vital processes. One trainee called for "improved lines of communication" and far more transparent and open publication of the decision-making processes that lead to these life-changing alterations.
+
+There was an overall theme of feeling "disillusioned", "frustrated", "disheartened", and "let down" amongst the free text responses. One trainee notes that "coupled with an exhausting and difficult 12+ months of covid, I feel undervalued and appreciated" by their regulatory bodies. Trainees made significant personal and professional sacrifices to work exhausting emergency surge rotas while not obtaining the necessary professional requirements to be competitive at ST3 application. Another trainee expands on this by saying "the amount of sacrifice this year to not be given a training job feels beyond insulting". The responses to this questionnaire give a clear indication that there is a sense of disconnect now felt between trainees and their regulatory bodies.
+
+Many trainees also feel "vulnerable" for not having support to find verified CT3 top up training, and still feel unsure as to how they can be guaranteed that these training experiences will count upon re-application to training at ST4 level. This survey demonstrates a consistent sentiment that clear guidance, support, and assurance from regulatory bodies to show a transparency of assessment and validation will be key to tempering this vulnerability, and start to bridge the disconnect which has emerged.
+
+The strengths and limitations of this survey must be considered when interpreting its findings. The data represent a candid account from junior doctors affected by this year's ST3 recruitment process and the survey was rapidly disseminated with minimal delay after the recruitment process ended, thus minimising recall bias. We obtained responses from across the UK, thus allowing for generalisability of our findings between regions. However, due to the need for rapid analysis we relied on algorithmically-assisted sentiment analysis to screen free-text responses for themes and topics, and while the method of sentiment analysis adopted provided a means of scoring responses according to a dictionary of words with ascribed polarities, this approach did result in text passages that still appeared generally negative to the human eye despite being scored positively by the algorithm.
+
+This survey has clearly highlighted perceived issues in the ST3 recruitment process 2021 that needs to be further addressed in order to guide future workforce planning and the delivery of training. Ideally, the highlighted discontent and frustration felt by some trainees will help relevant stakeholders better understand what would be of benefit going forward. Regardless of the decision an individual trainee has taken in light of the recruitment process, it is imperative that they are fully supported locally, regionally and nationally. Trainees have raised a lack of clear access to information regarding competencies required for the standalone posts and how these should be signed off. One solution could include junior anaesthetic doctors being provided a supervisor affiliated with the RCoA in temporary non-training posts to ensure adherance to published College guidance regardig such posts. From a CESR point of view, trainees have expressed that the GMC and RCoA should produce clearer guidance regarding the paperwork needed to achieve this, as well as highlighting the advantages and disadvantages of this pathway. The key to achieving the above is clear communication and easy access to the relevant information. Navigating the complexity of workforce planning must involve a collaborative approach between relevant stakeholders, membership organisations and trainees in order to secure the future of the specialty.
+
+# Acknowledgements
+
+We thank the Association of Anaesthetists for their assistance in dissemination of the survey to their members.
+
+# Competing Interests
+
+Dr Roopa McCrossan is the Chair of the Association of Anaesthetists Trainee Committee. Dr Stuart Edwardson is an Elected member of the Association of Anaesthetists Trainee Committee. We declare no external funding for this study.
+
+# References
+
+# Supplementary Material
+
+Here we present all the free-text responses submitted to the survey with some anonymised demographic characteristics of the respondent provided for context.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+survey %>%
+  select(`Age range` = WhatIsYourAge, `Sex` = WhatIsYourSex, `Current Role` = WhatIsYourCurrentRole, `What general concerns would you like to share with us?` = WhatGeneralConcernsWouldYouLikeToShareWithUsRegardingThisYearsSt3ApplicationsIfThereAreSpecificPersonalCircumstancesYouAreHappyToShareWithTheRelevantStakeholdersPleaseFeelFreeToContributeThemHereWeMayPublishSomeOfTheseAsAnonymisedQuotesToConveyTheDepthOfFeelingAroundThisIssue, ID) %>%
+  full_join(sentiments_text_df, by = "ID") %>%
+  select(-text) %>%
+  arrange(ave_sentiment) %>%
+  mutate(ave_sentiment = round(ave_sentiment, digits = 3)) %>%
+  rename(`Sentiment score` = ave_sentiment) %>%
+  drop_na() %>%
+  pander("Supplementary Table 1: Free-text responses and sentiment scores, arranged by sentiment score, from most negative to most positive.")
+```
